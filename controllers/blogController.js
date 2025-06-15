@@ -30,30 +30,50 @@ exports.createBlog = async (req, res) => {
 exports.getAllPublishedBlogs = async (req, res) => {
   try {
     const { page = 1, limit = 20, author, title, tags, orderBy = 'timestamp' } = req.query;
+
     const query = { state: 'published' };
 
-    if (author) query.author = new RegExp(author, 'i');
     if (title) query.title = new RegExp(title, 'i');
+
     if (tags) query.tags = { $in: tags.split(',') };
 
-    const blogs = await Blog.find(query)
-      .sort({ [orderBy]: -1 })
-      .skip((page - 1) * limit)
-      .limit(parseInt(limit))
-      .populate('author', 'first_name last_name email');
+    let blogs = await Blog.find(query)
+      .populate('author', 'first_name last_name email')
+      .sort({ [orderBy]: -1 });
 
-    res.json(blogs);
+    if (author) {
+      blogs = blogs.filter(blog => {
+        if (blog.author) {
+          const fullName = `${blog.author.first_name} ${blog.author.last_name}`.toLowerCase();
+          return fullName.includes(author.toLowerCase());
+        }
+        return false;
+      });
+    }
+
+    const start = (page - 1) * limit;
+    const end = start + parseInt(limit);
+    const paginatedBlogs = blogs.slice(start, end);
+
+    res.json({
+      blogs: paginatedBlogs,
+      totalCount: blogs.length,
+      totalPages: Math.ceil(blogs.length / limit),
+      currentPage: parseInt(page)
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 };
+
 
 // Get one published blog and increment read_count
 exports.getOnePublishedBlog = async (req, res) => {
   try {
     const blog = await Blog.findOne({ _id: req.params.id, state: 'published' }).populate('author', 'first_name last_name email');
 
-    if (!blog) return res.status(404).json({ message: 'Blog not found or not published' });
+    if (!blog) 
+      return res.status(403).json({ message: 'Blog not found' });
 
     blog.read_count += 1;
     await blog.save();
